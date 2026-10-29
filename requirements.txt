@@ -1,0 +1,16 @@
+streamlit
+fastapi
+uvicorn[standard]
+pandas
+scikit-learn
+numpy
+groq
+python-dotenv
+requests
+httpx
+pypdf
+python-multipart
+tavily-python
+plotly
+matplotlib
+joblib

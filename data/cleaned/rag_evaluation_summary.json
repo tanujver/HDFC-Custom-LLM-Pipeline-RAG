@@ -1,0 +1,10 @@
+{
+    "total_questions": 300,
+    "completed_questions": 0,
+    "rag_error_count": 300,
+    "semantic_verdict_counts": {},
+    "average_rag_latency_seconds": null,
+    "average_semantic_judge_latency_seconds": null,
+    "average_end_to_end_latency_seconds": null,
+    "average_lexical_similarity": null
+}

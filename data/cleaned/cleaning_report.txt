@@ -1,0 +1,44 @@
+DATA CLEANING REPORT
+=======================================================
+
+Dataset: BankFAQs
+Input file: BankFAQs.csv
+Output file: BankFAQs.csv
+Original rows: 1773
+Final rows: 1496
+Rows removed due to missing required values: 0
+Duplicate rows removed: 277
+Original columns: ['Question', 'Answer', 'Class']
+Final columns: ['Question', 'Answer', 'Class']
+Status: SUCCESS
+
+-------------------------------------------------------
+
+Dataset: Banking77 Train
+Input file: banking77_train.csv
+Output file: banking77_train_cleaned.csv
+Original rows: 10003
+Final rows: 9999
+Rows removed due to missing required values: 0
+Duplicate rows removed: 4
+Original columns: ['text', 'category']
+Final columns: ['text', 'category']
+Status: SUCCESS
+
+-------------------------------------------------------
+
+Dataset: Banking77 Test
+Input file: banking77_test.csv
+Output file: banking77_test_cleaned.csv
+Original rows: 3080
+Final rows: 3079
+Rows removed due to missing required values: 0
+Duplicate rows removed: 1
+Original columns: ['text', 'category']
+Final columns: ['text', 'category']
+Status: SUCCESS
+
+-------------------------------------------------------
+
+
+Successfully cleaned: 3 out of 3 datasets.
