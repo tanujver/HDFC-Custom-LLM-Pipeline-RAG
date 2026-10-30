@@ -1,10 +1,14 @@
 **HDFC Bank AI Assistant — Custom LLM Pipeline with RAG**
 
+
+
 **Live Application:** https://hdfc-custom-llm-pipeline-rag-ui.onrender.com
 
 **Backend API:** https://hdfc-custom-llm-pipeline-rag.onrender.com/
 
 **API Documentation:** https://hdfc-custom-llm-pipeline-rag.onrender.com//docs
+
+**Relevant Screenshots:** https://drive.google.com/drive/folders/1Qvn9Pc9wTtaPJXMUmnsZhlmM95J6th0V?usp=sharing
 
 An employee-facing AI assistant designed to help bank employees retrieve relevant banking FAQ information and generate grounded responses using Large Language Models (LLMs), Retrieval-Augmented Generation (RAG), and intent classification.
 
