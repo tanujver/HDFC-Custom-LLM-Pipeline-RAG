@@ -1,8 +1,14 @@
-HDFC Bank AI Assistant — Custom LLM Pipeline with RAG
+**HDFC Bank AI Assistant — Custom LLM Pipeline with RAG**
+
+**Live Application:** https://hdfc-custom-llm-pipeline-rag-ui.onrender.com
+
+**Backend API:** https://hdfc-custom-llm-pipeline-rag.onrender.com/
+
+**API Documentation:** https://hdfc-custom-llm-pipeline-rag.onrender.com//docs
 
 An employee-facing AI assistant designed to help bank employees retrieve relevant banking FAQ information and generate grounded responses using Large Language Models (LLMs), Retrieval-Augmented Generation (RAG), and intent classification.
 
-Table of Contents
+**Table of Contents**
 
 - "Project Overview" (#project-overview)
 - "Problem Statement" (#problem-statement)
@@ -25,13 +31,13 @@ Table of Contents
 
 ---
 
-Project Overview
+**Project Overview**
 
 The HDFC Bank AI Assistant is an AI-powered knowledge retrieval and question-answering application built to support bank employees in finding relevant banking information efficiently.
 
 The system combines a custom backend pipeline, FAQ retrieval, intent classification, and an LLM accessed through Groq. The application is designed to prioritize responses grounded in the available banking knowledge base rather than relying entirely on the model's general knowledge.
 
-The project includes:
+**The project includes:**
 
 - A Streamlit-based user interface.
 - A FastAPI backend for processing questions.
@@ -40,13 +46,13 @@ The project includes:
 - An LLM integration using "openai/gpt-oss-120b" through Groq.
 - A REST API that can be tested through FastAPI Swagger documentation.
 
-Live Application: https://hdfc-custom-llm-pipeline-rag-ui.onrender.com
+**Live Application:** https://hdfc-custom-llm-pipeline-rag-ui.onrender.com
 
-Backend API: https://hdfc-custom-llm-pipeline-rag.onrender.com/
+**Backend API:** https://hdfc-custom-llm-pipeline-rag.onrender.com/
 
-API Documentation: https://hdfc-custom-llm-pipeline-rag.onrender.com//docs
+**API Documentation:** https://hdfc-custom-llm-pipeline-rag.onrender.com//docs
 
-Problem Statement
+**Problem Statement**
 
 Bank employees may need to consult multiple sources to answer routine banking-related questions. Manually searching for information can increase response time and lead to inconsistent answers.
 
@@ -54,7 +60,7 @@ This project explores how an AI-powered retrieval and question-answering system 
 
 The application is a project prototype and is not an official HDFC Bank product.
 
-Objectives
+**Objectives**
 
 1. Build a custom question-answering pipeline using an LLM.
 2. Retrieve relevant information from a banking FAQ knowledge base.
@@ -64,7 +70,7 @@ Objectives
 6. Evaluate the intent classifier, retrieval component, and response-generation pipeline separately.
 7. Deploy the backend and frontend for demonstration.
 
-Key Features
+**Key Features**
 
 - Banking FAQ retrieval: Searches a curated FAQ dataset for relevant information.
 - LLM-powered responses: Uses Groq to access the "openai/gpt-oss-120b" model.
@@ -75,24 +81,44 @@ Key Features
 - API documentation: Supports endpoint testing through Swagger UI.
 - Modular pipeline: Separates retrieval, classification, API handling, and response generation.
 
-System Architecture
+## 🏦 HDFC Bank AI Assistant – System Workflow
 
+```mermaid
 flowchart TD
-    A[Bank Employee] --> B[Streamlit Frontend]
-    B --> C[FastAPI Backend]
-    C --> D[Input Validation and Guardrails]
-    D --> E[Intent Classification]
-    D --> F[FAQ Retrieval]
-    F --> G[Relevant FAQ Context]
-    E --> H[Query Processing]
-    G --> I[LLM via Groq]
-    H --> I
-    I --> J[Generated Response]
-    J --> K[Streamlit UI]
+    A(["🏦 Bank Employee"]) --> B["💬 Streamlit Frontend"]
+    B -->|"User Query"| C["⚙️ FastAPI Backend"]
+
+    C --> D["🛡️ Input Validation & Guardrails"]
+    D --> E["🎯 Intent Classification<br/>Banking77 Classifier"]
+
+    E --> F["🔎 FAQ Retrieval<br/>TF-IDF + Cosine Similarity"]
+    F --> G["📚 Relevant FAQ Context"]
+
+    G --> H["🧹 Query Pre-processing"]
+    H --> I["🤖 LLM Processing via Groq API<br/>openai/gpt-oss-120b"]
+
+    I --> J["✨ Generated Response"]
+    J --> K["📤 FastAPI Response"]
+    K --> L(["🖥️ Streamlit UI<br/>Answer Displayed to Bank Employee"])
+
+    classDef employee fill:#16324F,stroke:#4EA5D9,color:#fff,stroke-width:2px
+    classDef frontend fill:#174C3C,stroke:#42C99A,color:#fff,stroke-width:2px
+    classDef backend fill:#263B63,stroke:#7299E8,color:#fff,stroke-width:2px
+    classDef security fill:#5A3515,stroke:#E5A34B,color:#fff,stroke-width:2px
+    classDef processing fill:#393064,stroke:#A78BFA,color:#fff,stroke-width:2px
+    classDef output fill:#164B48,stroke:#48C9B0,color:#fff,stroke-width:2px
+
+    class A,L employee
+    class B frontend
+    class C,K backend
+    class D security
+    class E,F,G,H,I processing
+    class J output
+```
 
 The architecture represents the intended application flow. The exact runtime path depends on the implementation of the deployed version.
 
-Technology Stack
+**Technology Stack**
 
 Component| Technology
 Programming language| Python
@@ -110,9 +136,9 @@ API testing| FastAPI Swagger UI
 Deployment| Render
 Version control| Git and GitHub
 
-Datasets
+**Datasets**
 
-1. Banking FAQs
+**1. Banking FAQs**
 
 The FAQ dataset contains questions, answers, and class/category labels related to banking.
 
@@ -125,7 +151,7 @@ Primary purpose| FAQ retrieval and grounded response generation
 
 The dataset was cleaned and prepared for use in the retrieval pipeline.
 
-2. Banking77
+**2. Banking77**
 
 Banking77 is a banking-related intent classification dataset containing 77 intent categories.
 
@@ -135,9 +161,9 @@ Testing| 3,080| 77
 
 The intent classification pipeline uses TF-IDF to transform text into numerical features and Logistic Regression to predict the intent category.
 
-Project Workflow
+**Project Workflow**
 
-Step 1: Data Preparation
+**Step 1: Data Preparation**
 
 - Load the FAQ and Banking77 datasets.
 - Inspect dataset structure and missing values.
@@ -146,53 +172,53 @@ Step 1: Data Preparation
 - Prepare text fields for downstream processing.
 - Preserve relevant question, answer, and category information.
 
-Step 2: Intent Classification
+**Step 2: Intent Classification**
 
 - Convert text into numerical features using TF-IDF.
 - Train a Logistic Regression classifier.
 - Evaluate predictions on the Banking77 test dataset.
 - Measure accuracy, macro-F1, and weighted-F1.
 
-Step 3: FAQ Retrieval
+**Step 3: FAQ Retrieval**
 
 - Represent FAQ questions using TF-IDF.
 - Compare the incoming query against the FAQ question representations.
 - Use cosine similarity to identify relevant FAQ entries.
 - Pass retrieved context to the response-generation component.
 
-Step 4: LLM Response Generation
+**Step 4: LLM Response Generation**
 
 - Send the user's question and retrieved context to the LLM through Groq.
 - Generate a response using the supplied information.
 - Return the response to the application interface.
 
-Step 5: API Development
+**Step 5: API Development**
 
 - Implement question-answering functionality through FastAPI.
 - Expose the "/ask" endpoint.
 - Use Uvicorn to run the API server.
 - Validate API functionality using the "/docs" interface.
 
-Step 6: Frontend Development
+**Step 6: Frontend Development**
 
 - Build the interactive interface using Streamlit.
 - Connect the frontend to the deployed backend API.
 - Display responses to submitted questions.
 
-Step 7: Evaluation and Deployment
+**Step 7: Evaluation and Deployment**
 
 - Evaluate intent classification separately.
 - Assess FAQ retrieval using similarity-based evaluation.
 - Test baseline LLM generation and RAG response generation.
 - Deploy the backend and frontend as separate services on Render.
 
-Retrieval-Augmented Generation (RAG)
+**Retrieval-Augmented Generation (RAG)**
 
 Retrieval-Augmented Generation combines information retrieval with LLM-based response generation.
 
 Instead of relying only on the LLM's internal knowledge, the pipeline retrieves potentially relevant FAQ information and supplies it as context.
 
-RAG workflow
+**RAG workflow**
 
 1. Receive a banking-related question.
 2. Transform the query into a TF-IDF representation.
@@ -201,7 +227,7 @@ RAG workflow
 5. Provide the question and retrieved context to the LLM.
 6. Return the generated response.
 
-Why RAG?
+**Why RAG?**
 
 - Provides access to project-specific FAQ information.
 - Can improve relevance when the retrieved context matches the query.
@@ -210,11 +236,11 @@ Why RAG?
 
 Important: Retrieval does not guarantee correctness. Responses must still be evaluated for factual accuracy, relevance, and whether they are supported by the retrieved context.
 
-Intent Classification
+**Intent Classification**
 
 The intent classification component uses the Banking77 dataset.
 
-Model pipeline
+**Model pipeline**
 
 "Input Text → TF-IDF Vectorization → Logistic Regression → Predicted Intent"
 
@@ -222,25 +248,25 @@ TF-IDF converts text into numerical features based on term importance. Logistic 
 
 The classifier is a separate component from the LLM. It predicts an intent category; it does not itself generate the final natural-language answer.
 
-Evaluation Results
+**Evaluation Results**
 
 1. Banking77 Intent Classification
 
 Metric| Result
 Test examples| 3,080
 Intent categories| 77
-Accuracy| 88.71%
-Macro-F1| 88.88%
-Weighted-F1| 88.88%
+**Accuracy**| 88.71%
+**Macro-F1**| 88.88%
+**Weighted-F1**| 88.88%
 
 Interpretation: The classifier achieved 85.71% accuracy on the test dataset. Macro-F1 gives equal weight to each intent category, while weighted-F1 accounts for the number of examples in each category.
 
-2. FAQ Retrieval Evaluation
+**2. FAQ Retrieval Evaluation**
 
 Metric| Result
-Evaluation questions| 268
-Average best-answer cosine similarity| 0.68
-Questions with best similarity ≥ 0.70| 47.39%
+**Evaluation questions**| 268
+**Average best-answer cosine similarity**| 0.68
+**Questions with best similarity ≥ 0.70**| 47.39%
 
 These similarity results are retrieval diagnostics, not verified answer-correctness scores. A high cosine similarity does not necessarily mean that the retrieved answer is correct.
 
@@ -249,87 +275,28 @@ These similarity results are retrieval diagnostics, not verified answer-correctn
 The baseline evaluation attempted to generate answers without the FAQ retrieval component.
 
 Metric| Result
-Evaluation questions| 268
-Successful responses| 76
-Failed responses| 192
-Average latency| 1.24 seconds
+**Evaluation questions**| 268
+**Successful responses**| 76
+**Failed responses|** 192
+**Average latency**| 1.24 seconds
 
 The 192 failures were generation/API or script-level failures in the evaluation run. They must not be interpreted as 192 incorrect answers.
 
 Because many requests failed, these results do not provide a fair answer-quality comparison against RAG.
 
-4. RAG LLM Evaluation
+**4. RAG LLM Evaluation**
 
 Metric| Result
-Evaluation questions| 268
-Successful responses| 268
-Failed responses| 0
-Average latency| 4.15 seconds
+**Evaluation questions| 268
+Successful responses**| 268
+**Failed responses**| 0
+**Average latency**| 4.15 seconds
 
 The RAG evaluation completed all 268 response-generation attempts successfully in the recorded run.
 
 Interpretation: RAG achieved a higher successful-response count in this evaluation run, with an average latency of 4.15 seconds. Successful generation alone does not establish answer correctness. A fair quality comparison requires both systems to be evaluated on the same successfully processed questions using consistent correctness criteria.
 
-Application Screenshots
-
-Create a folder named "screenshots" in the repository and add genuine screenshots from your local or deployed application.
-
-Suggested folder structure:
-
-screenshots/
-├── streamlit_home.png
-├── banking_question_answer.png
-├── api_swagger_docs.png
-├── api_ask_response.png
-├── intent_classification_metrics.png
-├── retrieval_evaluation.png
-└── rag_evaluation_summary.png
-
-1. Streamlit Application
-
-"Streamlit application" (screenshots/streamlit_home.png)
-
-The main interface of the HDFC Bank AI Assistant.
-
-2. Question and Answer Example
-
-"Banking question and answer" (screenshots/banking_question_answer.png)
-
-An example question submitted through the application and the response returned by the system. Use a real, tested example.
-
-3. FastAPI Swagger Documentation
-
-"FastAPI Swagger documentation" (screenshots/api_swagger_docs.png)
-
-The API documentation page available at "/docs".
-
-4. API Request and Response
-
-"FastAPI ask endpoint" (screenshots/api_ask_response.png)
-
-A real request to the "/ask" endpoint and its response.
-
-5. Intent Classification Metrics
-
-"Intent classification evaluation" (screenshots/intent_classification_metrics.png)
-
-The actual classification evaluation output. Add a confusion matrix only if one has been generated from the test predictions.
-
-6. Retrieval Evaluation
-
-"FAQ retrieval evaluation" (screenshots/retrieval_evaluation.png)
-
-The recorded FAQ retrieval evaluation results.
-
-7. RAG Evaluation
-
-"RAG evaluation summary" (screenshots/rag_evaluation_summary.png)
-
-The RAG response-generation evaluation summary.
-
-«Replace each placeholder with the corresponding real image before publishing the final README. If a screenshot has not been captured, either capture it or remove that image section. Do not create a misleading screenshot or claim that an ungenerated plot exists.»
-
-Project Structure
+**Project Structure**
 
 The following is a representative structure. Adjust filenames to match the actual repository.
 
@@ -357,19 +324,19 @@ Only include files and folders that actually exist in the repository. Do not com
 
 Local Setup
 
-Prerequisites
+**Prerequisites**
 
 - Python 3.10 or another version supported by the project's dependencies.
 - Git.
 - A Groq API key.
 - The required project datasets.
 
-1. Clone the Repository
+**1. Clone the Repository**
 
 git clone <YOUR_GITHUB_REPOSITORY_URL>
 cd HDFC-Custom-LLM-Pipeline-RAG
 
-2. Create a Virtual Environment
+**2. Create a Virtual Environment**
 
 python -m venv venv
 
@@ -377,11 +344,11 @@ Activate it on Windows:
 
 venv\Scripts\activate
 
-3. Install Dependencies
+**3. Install Dependencies**
 
 pip install -r requirements.txt
 
-4. Configure Environment Variables
+**4. Configure Environment Variables**
 
 Create a ".env" file in the project root if the backend expects it:
 
@@ -390,7 +357,7 @@ USER_AGENT=HDFC-Bank-AI-Assistant/1.0
 
 Replace the example value with your own key locally. Never commit this file to GitHub.
 
-5. Configure the Frontend
+**5. Configure the Frontend**
 
 If the application uses Streamlit secrets, configure the values expected by the actual frontend code in ".streamlit/secrets.toml".
 
@@ -401,7 +368,7 @@ ADMIN_PASSWORD = "replace-with-a-strong-password"
 
 Use the actual configuration keys required by the application. Do not publish a real admin password.
 
-6. Start the Backend
+**6. Start the Backend**
 
 uvicorn main:app --reload
 
@@ -409,7 +376,7 @@ Open the API documentation:
 
 http://127.0.0.1:8000/docs
 
-7. Start the Frontend
+**7. Start the Frontend**
 
 In a separate terminal:
 
@@ -460,7 +427,7 @@ Security and Limitations
 - The recorded evaluation metrics are specific to the datasets and evaluation runs used in this project.
 - The project is a prototype for demonstration and learning. It is not an official HDFC Bank system and should not be used for real banking decisions without appropriate authorization, validation, security controls, and compliance review.
 
-Future Improvements
+**Future Improvements**
 
 - Add a formal answer-correctness evaluation with a validated test set.
 - Compare baseline and RAG on the same successfully processed questions.
@@ -472,13 +439,13 @@ Future Improvements
 - Strengthen prompt-injection defenses and output-grounding checks.
 - Improve observability and error handling for deployed services.
 
-Author
+**Author**
 
-Tanuj Verma
+**Tanuj Verma**
 
-Data Science and AI | Machine Learning | Generative AI
+**Data Science and AI | Machine Learning | Generative AI**
 
-GitHub: [Add your GitHub profile URL]
+**GitHub: [https://github.com/]**
 
 ---
 
