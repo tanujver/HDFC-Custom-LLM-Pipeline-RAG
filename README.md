@@ -6,7 +6,7 @@
 
 **Backend API:** https://hdfc-custom-llm-pipeline-rag.onrender.com/
 
-**API Documentation:** https://hdfc-custom-llm-pipeline-rag.onrender.com//docs
+**API Documentation:** https://hdfc-custom-llm-pipeline-rag.onrender.com/docs
 
 **Relevant Screenshots:** https://drive.google.com/drive/folders/1Qvn9Pc9wTtaPJXMUmnsZhlmM95J6th0V?usp=sharing
 
