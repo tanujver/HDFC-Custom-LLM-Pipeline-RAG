@@ -1,6 +1,5 @@
 import os
 import html
-import re
 from pathlib import Path
 
 import pandas as pd
@@ -39,12 +38,17 @@ except Exception:
 # 2. SESSION STATE
 # =========================================================
 
-for key, default in {
+SESSION_DEFAULTS = {
     "admin_authenticated": False,
     "messages": [],
     "last_answer": "",
     "last_question": "",
-}.items():
+    "last_request_id": "",
+    "last_intent": "",
+    "last_feedback": None,
+}
+
+for key, default in SESSION_DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -96,6 +100,14 @@ st.markdown(
         line-height: 1.8;
         overflow-wrap: anywhere;
         color: #243b53;
+    }
+
+    .feedback-box {
+        background: white;
+        border: 1px solid #d9e2ec;
+        border-radius: 12px;
+        padding: 15px;
+        margin-top: 12px;
     }
 
     div[data-testid="stMetric"] {
@@ -170,6 +182,41 @@ def api_ask(question):
 
     except requests.exceptions.Timeout:
         return None, "The request timed out. Please try again."
+
+    except requests.exceptions.RequestException as exc:
+        return None, str(exc)
+
+
+def api_submit_feedback(request_id, feedback):
+    """Submit feedback against the original ask request."""
+
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/feedback",
+            json={
+                "request_id": request_id,
+                "feedback": feedback,
+            },
+            timeout=15,
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+
+        if not response.ok:
+            return None, str(
+                data.get("detail", f"HTTP {response.status_code}")
+            )
+
+        return data, None
+
+    except requests.exceptions.ConnectionError:
+        return None, "Cannot connect to FastAPI."
+
+    except requests.exceptions.Timeout:
+        return None, "Feedback request timed out."
 
     except requests.exceptions.RequestException as exc:
         return None, str(exc)
@@ -276,6 +323,10 @@ if page == "Employee Assistant":
         "Verify important decisions using official bank policies."
     )
 
+    # -----------------------------------------------------
+    # QUESTION FORM
+    # -----------------------------------------------------
+
     with st.form("ask_form", clear_on_submit=True):
         question = st.text_area(
             "Your question",
@@ -290,11 +341,16 @@ if page == "Employee Assistant":
             use_container_width=True,
         )
 
+    # -----------------------------------------------------
+    # PROCESS QUESTION
+    # -----------------------------------------------------
+
     if submitted:
         question = question.strip()
 
         if not question:
             st.warning("Please enter a question.")
+
         else:
             with st.spinner("Preparing your answer..."):
                 data, error = api_ask(question)
@@ -321,14 +377,36 @@ if page == "Employee Assistant":
                     st.warning(answer)
 
                 else:
-                    st.session_state.last_question = question
-                    st.session_state.last_answer = answer
-                    st.session_state.messages.append({
-                        "question": question,
-                        "answer": answer,
-                    })
+                    request_id = str(data.get("request_id") or "")
+                    intent = str(data.get("intent") or "")
+
+                    if not request_id:
+                        st.error(
+                            "The API response did not contain a request ID. "
+                            "Feedback cannot be linked safely."
+                        )
+
+                    else:
+                        st.session_state.last_question = question
+                        st.session_state.last_answer = answer
+                        st.session_state.last_request_id = request_id
+                        st.session_state.last_intent = intent
+                        st.session_state.last_feedback = None
+
+                        st.session_state.messages.append({
+                            "question": question,
+                            "answer": answer,
+                            "request_id": request_id,
+                            "intent": intent,
+                            "feedback": None,
+                        })
+
+    # -----------------------------------------------------
+    # DISPLAY LATEST ANSWER
+    # -----------------------------------------------------
 
     if st.session_state.last_answer:
+
         st.markdown("### Assistant Answer")
 
         st.markdown(
@@ -338,6 +416,11 @@ if page == "Employee Assistant":
             unsafe_allow_html=True,
         )
 
+        if st.session_state.last_intent:
+            st.caption(
+                f"Predicted intent: {st.session_state.last_intent}"
+            )
+
         st.download_button(
             "⬇️ Download answer",
             data=st.session_state.last_answer,
@@ -345,19 +428,120 @@ if page == "Employee Assistant":
             mime="text/plain",
         )
 
+        # -------------------------------------------------
+        # FEEDBACK SECTION
+        # -------------------------------------------------
+
+        st.markdown("### Was this answer helpful?")
+
+        if st.session_state.last_feedback is None:
+
+            feedback_col1, feedback_col2 = st.columns(2)
+
+            with feedback_col1:
+                if st.button(
+                    "👍 Helpful",
+                    key="latest_helpful",
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    with st.spinner("Saving feedback..."):
+                        result, error = api_submit_feedback(
+                            st.session_state.last_request_id,
+                            "helpful",
+                        )
+
+                    if error:
+                        st.error(error)
+                    else:
+                        st.session_state.last_feedback = "helpful"
+
+                        for item in reversed(st.session_state.messages):
+                            if (
+                                item["request_id"]
+                                == st.session_state.last_request_id
+                            ):
+                                item["feedback"] = "helpful"
+                                break
+
+                        st.success("Thank you! Your feedback was saved.")
+                        st.rerun()
+
+            with feedback_col2:
+                if st.button(
+                    "👎 Not Helpful",
+                    key="latest_not_helpful",
+                    use_container_width=True,
+                ):
+                    with st.spinner("Saving feedback..."):
+                        result, error = api_submit_feedback(
+                            st.session_state.last_request_id,
+                            "not_helpful",
+                        )
+
+                    if error:
+                        st.error(error)
+                    else:
+                        st.session_state.last_feedback = "not_helpful"
+
+                        for item in reversed(st.session_state.messages):
+                            if (
+                                item["request_id"]
+                                == st.session_state.last_request_id
+                            ):
+                                item["feedback"] = "not_helpful"
+                                break
+
+                        st.success("Thank you! Your feedback was saved.")
+                        st.rerun()
+
+        else:
+            if st.session_state.last_feedback == "helpful":
+                st.success("You marked this answer as Helpful. Thank you!")
+
+            else:
+                st.info(
+                    "You marked this answer as Not Helpful. "
+                    "Thank you for your feedback."
+                )
+
+    # -----------------------------------------------------
+    # CONVERSATION HISTORY
+    # -----------------------------------------------------
+
     if st.session_state.messages:
+
         with st.expander("Conversation history"):
-            for item in reversed(st.session_state.messages[-10:]):
+
+            for index, item in enumerate(
+                reversed(st.session_state.messages[-10:])
+            ):
+
                 st.markdown("**Question**")
                 st.write(item["question"])
+
                 st.markdown("**Answer**")
                 st.write(item["answer"])
+
+                if item.get("intent"):
+                    st.caption(f"Intent: {item['intent']}")
+
+                feedback = item.get("feedback")
+
+                if feedback == "helpful":
+                    st.caption("Feedback: 👍 Helpful")
+                elif feedback == "not_helpful":
+                    st.caption("Feedback: 👎 Not Helpful")
+
                 st.divider()
 
         if st.button("Clear conversation"):
             st.session_state.messages = []
             st.session_state.last_answer = ""
             st.session_state.last_question = ""
+            st.session_state.last_request_id = ""
+            st.session_state.last_intent = ""
+            st.session_state.last_feedback = None
             st.rerun()
 
 
@@ -380,12 +564,13 @@ elif page == "System Status":
 
         if health_error:
             st.error(health_error)
+
         else:
             st.success("FastAPI is responding")
 
             st.metric(
                 "FAQ Count",
-                number(health, ["faq_count", "total_faqs"]),
+                number(health, ["faq_records", "faq_count", "total_faqs"]),
             )
 
             if "intent_classifier_loaded" in health:
@@ -400,6 +585,7 @@ elif page == "System Status":
 
         if metrics_error:
             st.error(metrics_error)
+
         else:
             st.metric(
                 "Recorded Requests",
@@ -408,7 +594,7 @@ elif page == "System Status":
 
             st.metric(
                 "Average Latency",
-                f"{number(metrics, ['average_latency_seconds']):.2f} s",
+                f"{number(metrics, ['avg_latency_seconds']):.2f} s",
             )
 
     st.markdown("### API Configuration")
@@ -424,6 +610,8 @@ elif page == "Admin Dashboard":
     st.title("📊 Admin Monitoring Dashboard")
     st.caption("Operational analytics and test results")
 
+    # Existing admin password protection - unchanged
+
     if not ADMIN_PASSWORD:
         st.warning(
             "Set ADMIN_PASSWORD in .streamlit/secrets.toml "
@@ -438,6 +626,7 @@ elif page == "Admin Dashboard":
                 "Admin Password",
                 type="password",
             )
+
             login = st.form_submit_button(
                 "Login",
                 type="primary",
@@ -447,6 +636,7 @@ elif page == "Admin Dashboard":
             if password and password == ADMIN_PASSWORD:
                 st.session_state.admin_authenticated = True
                 st.rerun()
+
             else:
                 st.error("Incorrect password.")
 
@@ -471,6 +661,9 @@ elif page == "Admin Dashboard":
     trend, trend_error = api_get("/metrics/latency-trend")
     daily, daily_error = api_get("/metrics/daily")
 
+    intent_data, intent_error = api_get("/metrics/intents")
+    feedback_data, feedback_error = api_get("/metrics/feedback")
+
     if metrics_error:
         st.error(f"Could not load metrics: {metrics_error}")
         st.stop()
@@ -480,19 +673,23 @@ elif page == "Admin Dashboard":
         st.stop()
 
     total = int(number(metrics, ["total_requests", "total_questions"]))
+
     success = int(number(
         metrics, ["successful_requests", "success_requests"]
     ))
+
     failed = int(number(
         metrics, ["failed_requests", "failure_requests"]
     ))
+
     blocked = int(number(metrics, ["blocked_requests"]))
+
     latency = number(
-        metrics, ["average_latency_seconds", "avg_latency_seconds"]
+        metrics, ["avg_latency_seconds", "average_latency_seconds"]
     )
 
     # -----------------------------------------------------
-    # FILTER CONTROLS
+    # REFRESH CONTROL
     # -----------------------------------------------------
 
     st.divider()
@@ -500,10 +697,14 @@ elif page == "Admin Dashboard":
     control1, control2 = st.columns([2, 2])
 
     with control1:
-        show_charts = st.toggle("Show analytics charts", value=True)
+        show_charts = st.toggle(
+            "Show analytics charts",
+            value=True,
+        )
 
     with control2:
-        st.caption("Refresh this page to fetch the latest backend data.")
+        if st.button("🔄 Refresh dashboard data"):
+            st.rerun()
 
     # -----------------------------------------------------
     # KPI CARDS
@@ -514,28 +715,35 @@ elif page == "Admin Dashboard":
     c1, c2, c3, c4, c5 = st.columns(5)
 
     c1.metric("Total Questions", f"{total:,}")
+
     c2.metric(
         "Successful",
         f"{success:,}",
         delta=f"{success / total * 100:.1f}% of total" if total else None,
     )
+
     c3.metric(
         "Failed",
         f"{failed:,}",
         delta=f"{failed / total * 100:.1f}% of total" if total else None,
         delta_color="inverse",
     )
+
     c4.metric("Blocked", f"{blocked:,}")
+
     c5.metric("Average Latency", f"{latency:.2f} s")
 
     if total == 0:
-        st.info("No requests recorded yet. Ask a question in Employee Assistant.")
+        st.info(
+            "No requests recorded yet. Ask a question in Employee Assistant."
+        )
 
     # -----------------------------------------------------
     # REQUEST ANALYTICS
     # -----------------------------------------------------
 
     if show_charts:
+
         st.divider()
         st.subheader("Request Analytics")
 
@@ -548,6 +756,7 @@ elif page == "Admin Dashboard":
 
         with chart1:
             st.markdown("**Requests by outcome**")
+
             visible_df = outcome_df[outcome_df["Count"] > 0]
 
             if not visible_df.empty:
@@ -563,6 +772,7 @@ elif page == "Admin Dashboard":
 
             if total:
                 visible_df = outcome_df.copy()
+
                 visible_df["Percentage"] = (
                     visible_df["Count"] / total * 100
                 ).round(2)
@@ -572,8 +782,173 @@ elif page == "Admin Dashboard":
                     use_container_width=True,
                     hide_index=True,
                 )
+
             else:
                 st.caption("No recorded requests.")
+
+    # -----------------------------------------------------
+    # NEW: INTENT ANALYTICS
+    # -----------------------------------------------------
+
+    st.divider()
+    st.subheader("🧠 Intent Analytics")
+
+    if intent_error:
+        st.warning(f"Intent analytics unavailable: {intent_error}")
+
+    else:
+        intent_rows = extract_rows(
+            intent_data,
+            ("items", "intents", "data"),
+        )
+
+        intent_df = normalise_dataframe(intent_rows)
+
+        if not intent_df.empty:
+
+            intent_col = next(
+                (c for c in ("intent", "predicted_intent")
+                 if c in intent_df.columns),
+                None,
+            )
+
+            count_col = next(
+                (c for c in ("count", "total_requests")
+                 if c in intent_df.columns),
+                None,
+            )
+
+            if intent_col and count_col:
+
+                intent_df[count_col] = pd.to_numeric(
+                    intent_df[count_col],
+                    errors="coerce",
+                ).fillna(0)
+
+                intent_df = intent_df.sort_values(
+                    count_col,
+                    ascending=False,
+                )
+
+                total_intent_requests = int(intent_df[count_col].sum())
+
+                st.metric(
+                    "Requests with Predicted Intent",
+                    f"{total_intent_requests:,}",
+                )
+
+                selected_intents = st.multiselect(
+                    "Filter intents",
+                    options=intent_df[intent_col].astype(str).tolist(),
+                    default=intent_df[intent_col].astype(str).tolist(),
+                    key="intent_filter",
+                )
+
+                filtered_intents = intent_df[
+                    intent_df[intent_col].astype(str).isin(selected_intents)
+                ]
+
+                if not filtered_intents.empty:
+
+                    intent_chart_col, intent_table_col = st.columns(2)
+
+                    with intent_chart_col:
+                        if show_charts:
+                            st.markdown("**Requests by predicted intent**")
+
+                            st.bar_chart(
+                                filtered_intents.set_index(intent_col)[
+                                    [count_col]
+                                ]
+                            )
+
+                    with intent_table_col:
+                        st.markdown("**Intent distribution**")
+
+                        st.dataframe(
+                            filtered_intents,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                else:
+                    st.info("Select at least one intent to view analytics.")
+
+            else:
+                st.warning(
+                    "Intent API returned data in an unexpected format."
+                )
+
+        else:
+            st.info(
+                "No intent data available yet. Ask questions to populate "
+                "intent analytics."
+            )
+
+    # -----------------------------------------------------
+    # NEW: FEEDBACK ANALYTICS
+    # -----------------------------------------------------
+
+    st.divider()
+    st.subheader("💬 Employee Feedback Analytics")
+
+    if feedback_error:
+        st.warning(f"Feedback analytics unavailable: {feedback_error}")
+
+    else:
+        feedback = (
+            feedback_data.get("data", {})
+            if isinstance(feedback_data, dict)
+            else {}
+        )
+
+        helpful = int(number(feedback, ["helpful"]))
+        not_helpful = int(number(feedback, ["not_helpful"]))
+        total_feedback = int(number(feedback, ["total_feedback"]))
+
+        positive_percentage = number(
+            feedback, ["positive_percentage"]
+        )
+
+        f1, f2, f3, f4 = st.columns(4)
+
+        f1.metric("Total Feedback", total_feedback)
+        f2.metric("Helpful", helpful)
+        f3.metric("Not Helpful", not_helpful)
+        f4.metric("Positive Feedback", f"{positive_percentage:.1f}%")
+
+        if total_feedback > 0:
+
+            feedback_df = pd.DataFrame({
+                "Feedback": ["Helpful", "Not Helpful"],
+                "Count": [helpful, not_helpful],
+            })
+
+            feedback_col1, feedback_col2 = st.columns(2)
+
+            with feedback_col1:
+                if show_charts:
+                    st.markdown("**Feedback distribution**")
+
+                    st.bar_chart(
+                        feedback_df.set_index("Feedback"),
+                        y="Count",
+                    )
+
+            with feedback_col2:
+                st.markdown("**Feedback summary**")
+
+                st.dataframe(
+                    feedback_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        else:
+            st.info(
+                "No employee feedback submitted yet. "
+                "Use the Helpful or Not Helpful buttons in Employee Assistant."
+            )
 
     # -----------------------------------------------------
     # ERROR CATEGORIES
@@ -588,19 +963,27 @@ elif page == "Admin Dashboard":
     )
 
     if isinstance(error_data, dict) and error_data:
+
         error_df = pd.DataFrame(
             list(error_data.items()),
             columns=["Category", "Count"],
         )
+
     elif isinstance(error_data, list) and error_data:
+
         error_df = pd.DataFrame(error_data)
+
     else:
         error_df = pd.DataFrame()
 
     if not error_df.empty:
+
         if "Category" not in error_df.columns:
             if "category" in error_df.columns:
-                error_df.rename(columns={"category": "Category"}, inplace=True)
+                error_df.rename(
+                    columns={"category": "Category"},
+                    inplace=True,
+                )
             elif "error_category" in error_df.columns:
                 error_df.rename(
                     columns={"error_category": "Category"},
@@ -609,13 +992,21 @@ elif page == "Admin Dashboard":
 
         if "Count" not in error_df.columns:
             if "count" in error_df.columns:
-                error_df.rename(columns={"count": "Count"}, inplace=True)
+                error_df.rename(
+                    columns={"count": "Count"},
+                    inplace=True,
+                )
             elif "total" in error_df.columns:
-                error_df.rename(columns={"total": "Count"}, inplace=True)
+                error_df.rename(
+                    columns={"total": "Count"},
+                    inplace=True,
+                )
 
         if {"Category", "Count"}.issubset(error_df.columns):
+
             error_df["Count"] = pd.to_numeric(
-                error_df["Count"], errors="coerce"
+                error_df["Count"],
+                errors="coerce",
             ).fillna(0)
 
             col1, col2 = st.columns([3, 2])
@@ -628,14 +1019,17 @@ elif page == "Admin Dashboard":
                 )
 
             with col2:
-                st.bar_chart(error_df.set_index("Category"), y="Count")
+                if show_charts:
+                    st.bar_chart(
+                        error_df.set_index("Category"),
+                        y="Count",
+                    )
+
         else:
             st.json(error_data)
+
     else:
-        st.info(
-            "No error categories returned. The backend must record and "
-            "return error_categories for this chart to populate."
-        )
+        st.info("No error categories recorded.")
 
     # -----------------------------------------------------
     # LATENCY TREND
@@ -649,39 +1043,54 @@ elif page == "Admin Dashboard":
     if not trend_error:
         trend_rows = extract_rows(
             trend,
-            ("trend", "latency_trend", "data", "points", "history"),
+            ("trend", "latency_trend", "data", "points", "history", "items"),
         )
 
     trend_df = normalise_dataframe(trend_rows)
 
     if not trend_df.empty:
+
         time_col = next(
             (c for c in ("timestamp", "date", "day", "time")
              if c in trend_df.columns),
             None,
         )
+
         latency_col = next(
             (c for c in (
-                "latency", "latency_seconds",
-                "average_latency_seconds", "avg_latency_seconds"
+                "latency",
+                "latency_seconds",
+                "average_latency_seconds",
+                "avg_latency_seconds",
             ) if c in trend_df.columns),
             None,
         )
 
         if time_col and latency_col:
+
             trend_df[latency_col] = pd.to_numeric(
-                trend_df[latency_col], errors="coerce"
+                trend_df[latency_col],
+                errors="coerce",
             )
+
             trend_df = trend_df.dropna(subset=[latency_col])
 
-            if not trend_df.empty:
+            if not trend_df.empty and show_charts:
+
                 st.line_chart(
                     trend_df.set_index(time_col)[[latency_col]]
                 )
-            else:
+
+            elif trend_df.empty:
                 st.info("No numeric latency data.")
+
         else:
-            st.dataframe(trend_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                trend_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
     else:
         st.info(
             "No latency trend returned by the backend yet."
@@ -701,13 +1110,18 @@ elif page == "Admin Dashboard":
     if not daily_error:
         daily_rows = extract_rows(
             daily,
-            ("daily", "daily_metrics", "data", "records"),
+            ("daily", "daily_metrics", "data", "records", "items"),
         )
 
     daily_df = normalise_dataframe(daily_rows)
 
     if not daily_df.empty:
-        st.dataframe(daily_df, use_container_width=True, hide_index=True)
+
+        st.dataframe(
+            daily_df,
+            use_container_width=True,
+            hide_index=True,
+        )
 
         date_col = next(
             (c for c in ("date", "day", "timestamp")
@@ -717,21 +1131,27 @@ elif page == "Admin Dashboard":
 
         count_cols = [
             c for c in (
-                "successful_requests", "success_requests",
-                "failed_requests", "failure_requests",
-                "blocked_requests", "total_requests"
+                "successful_requests",
+                "success_requests",
+                "failed_requests",
+                "failure_requests",
+                "blocked_requests",
+                "total_requests",
             ) if c in daily_df.columns
         ]
 
         if show_charts and date_col and count_cols:
+
             plot_df = daily_df.set_index(date_col).copy()
 
             for col in count_cols:
                 plot_df[col] = pd.to_numeric(
-                    plot_df[col], errors="coerce"
+                    plot_df[col],
+                    errors="coerce",
                 )
 
             st.line_chart(plot_df[count_cols])
+
     else:
         st.info(
             "Daily metrics not available."
@@ -758,43 +1178,92 @@ elif page == "Admin Dashboard":
 
     if not history_df.empty:
 
-        f1, f2 = st.columns([2, 2])
+        f1, f2, f3 = st.columns([2, 2, 2])
 
         with f1:
             search = st.text_input(
                 "Search history",
-                placeholder="Search status, category or request ID",
+                placeholder="Search status, intent or request ID",
             )
 
         with f2:
             if "status" in history_df.columns:
+
                 statuses = sorted(
-                    history_df["status"].dropna().astype(str).unique().tolist()
+                    history_df["status"]
+                    .dropna()
+                    .astype(str)
+                    .unique()
+                    .tolist()
                 )
+
                 selected_statuses = st.multiselect(
                     "Filter by status",
                     options=statuses,
                     default=statuses,
+                    key="history_status_filter",
                 )
+
             else:
                 selected_statuses = []
+
+        with f3:
+            if "predicted_intent" in history_df.columns:
+
+                available_intents = sorted(
+                    history_df["predicted_intent"]
+                    .dropna()
+                    .astype(str)
+                    .unique()
+                    .tolist()
+                )
+
+                selected_history_intents = st.multiselect(
+                    "Filter by intent",
+                    options=available_intents,
+                    default=available_intents,
+                    key="history_intent_filter",
+                )
+
+            else:
+                selected_history_intents = []
 
         filtered_df = history_df.copy()
 
         if search:
+
             mask = filtered_df.astype(str).apply(
                 lambda col: col.str.contains(
-                    search, case=False, na=False
+                    search,
+                    case=False,
+                    na=False,
                 )
             ).any(axis=1)
+
             filtered_df = filtered_df[mask]
 
         if selected_statuses and "status" in filtered_df.columns:
+
             filtered_df = filtered_df[
-                filtered_df["status"].astype(str).isin(selected_statuses)
+                filtered_df["status"]
+                .astype(str)
+                .isin(selected_statuses)
             ]
 
-        st.caption(f"Showing {len(filtered_df)} of {len(history_df)} records")
+        if (
+            selected_history_intents
+            and "predicted_intent" in filtered_df.columns
+        ):
+
+            filtered_df = filtered_df[
+                filtered_df["predicted_intent"]
+                .astype(str)
+                .isin(selected_history_intents)
+            ]
+
+        st.caption(
+            f"Showing {len(filtered_df)} of {len(history_df)} records"
+        )
 
         st.dataframe(
             filtered_df,
@@ -817,15 +1286,15 @@ elif page == "Admin Dashboard":
         )
 
     # -----------------------------------------------------
-    # API TEST REPORT - RENDER REAL HTML
+    # API TEST REPORT
     # -----------------------------------------------------
 
     st.divider()
     st.subheader("API Test Report")
 
     if REPORT_PATH.exists():
-        st.success("API test report found")
 
+        st.success("API test report found")
         st.caption("reports/api_test_report.html")
 
         try:
@@ -834,8 +1303,6 @@ elif page == "Admin Dashboard":
                 errors="replace",
             )
 
-            # Render the actual pytest-html page instead of displaying
-            # the HTML markup as plain text.
             components.html(
                 report_html,
                 height=850,
@@ -855,7 +1322,10 @@ elif page == "Admin Dashboard":
     # -----------------------------------------------------
 
     st.divider()
+
     st.caption(
         "Dashboard metrics reflect backend-recorded data. "
-        "Charts remain empty when the corresponding data is unavailable."
+        "Intent distribution represents classifier predictions, "
+        "not classifier accuracy. Employee feedback represents "
+        "perceived usefulness, not factual correctness."
     )

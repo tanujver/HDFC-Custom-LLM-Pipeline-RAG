@@ -5,98 +5,79 @@ from pathlib import Path
 from threading import Lock
 from typing import Optional
 
-# =====================================================
-# 1. DATABASE CONFIGURATION
-# =====================================================
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DB_PATH = PROJECT_DIR / "monitoring.db"
 
-# Serializes writes within this Python process. SQLite also coordinates
-# access between separate connections/processes.
 _write_lock = Lock()
 
 VALID_STATUSES = {"success", "failure", "blocked"}
+VALID_FEEDBACK = {"helpful", "not_helpful"}
 
 
-def _utc_now() -> str:
-    """Return a timezone-aware UTC timestamp in ISO-8601 format."""
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat()
 
 
 @contextmanager
 def _connect():
-    """Open a SQLite connection and ensure transactions are closed safely."""
-    connection = sqlite3.connect(
-        str(DB_PATH),
-        timeout=30,
-        isolation_level="DEFERRED",
-    )
-    connection.row_factory = sqlite3.Row
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA foreign_keys = ON")
+
     try:
-        connection.execute("PRAGMA busy_timeout = 30000")
-        connection.execute("PRAGMA foreign_keys = ON")
-        yield connection
-        connection.commit()
+        yield conn
+        conn.commit()
     except Exception:
-        connection.rollback()
+        conn.rollback()
         raise
     finally:
-        connection.close()
+        conn.close()
 
 
-# =====================================================
-# 2. INITIALIZE DATABASE
-# =====================================================
-
-def init_db() -> None:
-    """Create monitoring tables and indexes if they do not already exist."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
+def init_db():
     with _write_lock:
-        with _connect() as connection:
-            connection.execute(
-                """
+        with _connect() as conn:
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS request_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp_utc TEXT NOT NULL,
                     status TEXT NOT NULL
-                        CHECK (status IN ('success', 'failure', 'blocked')),
-                    latency_seconds REAL NOT NULL
-                        CHECK (latency_seconds >= 0),
+                        CHECK(status IN ('success', 'failure', 'blocked')),
+                    latency_seconds REAL NOT NULL,
                     error_category TEXT,
-                    endpoint TEXT NOT NULL DEFAULT '/ask',
-                    request_id TEXT
+                    endpoint TEXT,
+                    request_id TEXT,
+                    predicted_intent TEXT,
+                    feedback TEXT
+                        CHECK(
+                            feedback IS NULL OR
+                            feedback IN ('helpful', 'not_helpful')
+                        )
                 )
-                """
-            )
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_request_metrics_timestamp
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_request_timestamp
                 ON request_metrics(timestamp_utc)
-                """
-            )
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_request_metrics_status
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_request_status
                 ON request_metrics(status)
-                """
-            )
-            connection.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_request_metrics_error_category
-                ON request_metrics(error_category)
-                """
-            )
+            """)
 
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_request_intent
+                ON request_metrics(predicted_intent)
+            """)
 
-# Initialize on import so existing main.py imports continue to work.
-init_db()
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_request_id
+                ON request_metrics(request_id)
+            """)
 
-
-# =====================================================
-# 3. RECORD REQUESTS
-# =====================================================
 
 def record_request(
     status: str,
@@ -104,77 +85,56 @@ def record_request(
     error_category: Optional[str] = None,
     endpoint: str = "/ask",
     request_id: Optional[str] = None,
-) -> None:
-    """
-    Persist one completed request.
-
-    Compatible with the existing call:
-        record_request(status, elapsed_seconds)
-
-    status must be 'success', 'failure', or 'blocked'.
-    Avoid storing employee question text or other personal information.
-    """
-    normalized_status = str(status).strip().lower()
-    if normalized_status not in VALID_STATUSES:
-        # Unknown status should not silently become a success/failure count.
-        raise ValueError(
-            f"Invalid status {status!r}. Expected one of: "
-            f"{', '.join(sorted(VALID_STATUSES))}."
-        )
-
-    try:
-        latency = float(latency_seconds)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("latency_seconds must be a non-negative number.") from exc
-
-    if latency < 0:
-        raise ValueError("latency_seconds must be non-negative.")
-
-    category = (
-        str(error_category).strip()[:100]
-        if error_category is not None and str(error_category).strip()
-        else None
-    )
-    endpoint_value = str(endpoint or "/ask").strip()[:100]
-    request_id_value = (
-        str(request_id).strip()[:100]
-        if request_id is not None and str(request_id).strip()
-        else None
-    )
+    predicted_intent: Optional[str] = None
+):
+    if status not in VALID_STATUSES:
+        raise ValueError(f"Invalid status: {status}")
 
     with _write_lock:
-        with _connect() as connection:
-            connection.execute(
-                """
+        with _connect() as conn:
+            conn.execute("""
                 INSERT INTO request_metrics (
-                    timestamp_utc, status, latency_seconds,
-                    error_category, endpoint, request_id
+                    timestamp_utc,
+                    status,
+                    latency_seconds,
+                    error_category,
+                    endpoint,
+                    request_id,
+                    predicted_intent
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    _utc_now(),
-                    normalized_status,
-                    latency,
-                    category,
-                    endpoint_value,
-                    request_id_value,
-                ),
-            )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                _utc_now(),
+                status,
+                float(latency_seconds),
+                error_category,
+                endpoint,
+                request_id,
+                predicted_intent
+            ))
 
 
-# =====================================================
-# 4. METRICS SNAPSHOT (EXISTING API COMPATIBLE)
-# =====================================================
+def record_feedback(request_id: str, feedback: str) -> bool:
+    if feedback not in VALID_FEEDBACK:
+        raise ValueError("Feedback must be helpful or not_helpful")
 
-def get_metrics() -> dict:
-    """
-    Return all-time metrics in a shape compatible with the existing
-    FastAPI /metrics endpoint.
-    """
-    with _connect() as connection:
-        row = connection.execute(
-            """
+    if not request_id:
+        return False
+
+    with _write_lock:
+        with _connect() as conn:
+            cursor = conn.execute("""
+                UPDATE request_metrics
+                SET feedback = ?
+                WHERE request_id = ?
+            """, (feedback, request_id))
+
+            return cursor.rowcount > 0
+
+
+def get_metrics():
+    with _connect() as conn:
+        row = conn.execute("""
             SELECT
                 COUNT(*) AS total_requests,
                 SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)
@@ -183,125 +143,74 @@ def get_metrics() -> dict:
                     AS failed_requests,
                 SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END)
                     AS blocked_requests,
-                COALESCE(AVG(latency_seconds), 0) AS average_latency_seconds,
-                COALESCE(SUM(latency_seconds), 0) AS total_latency_seconds
+                AVG(latency_seconds) AS avg_latency_seconds,
+                SUM(latency_seconds) AS total_latency_seconds
             FROM request_metrics
-            """
-        ).fetchone()
+        """).fetchone()
 
-        categories = connection.execute(
-            """
-            SELECT COALESCE(error_category, 'uncategorized') AS category,
-                   COUNT(*) AS count
+        errors = conn.execute("""
+            SELECT error_category, COUNT(*) AS count
             FROM request_metrics
-            WHERE status = 'failure' AND error_category IS NOT NULL
+            WHERE error_category IS NOT NULL
             GROUP BY error_category
-            ORDER BY count DESC, category ASC
-            """
-        ).fetchall()
+        """).fetchall()
 
-    return {
-        "total_requests": int(row["total_requests"] or 0),
-        "successful_requests": int(row["successful_requests"] or 0),
-        "failed_requests": int(row["failed_requests"] or 0),
-        "blocked_requests": int(row["blocked_requests"] or 0),
-        "average_latency_seconds": round(
-            float(row["average_latency_seconds"] or 0), 3
-        ),
-        "total_latency_seconds": round(
-            float(row["total_latency_seconds"] or 0), 3
-        ),
-        "error_categories": {
-            item["category"]: int(item["count"]) for item in categories
-        },
-        "storage": "sqlite",
-    }
+        return {
+            "total_requests": row["total_requests"] or 0,
+            "successful_requests": row["successful_requests"] or 0,
+            "failed_requests": row["failed_requests"] or 0,
+            "blocked_requests": row["blocked_requests"] or 0,
+            "avg_latency_seconds": row["avg_latency_seconds"] or 0,
+            "total_latency_seconds": row["total_latency_seconds"] or 0,
+            "error_categories": {
+                item["error_category"]: item["count"]
+                for item in errors
+            },
+            "storage": "sqlite"
+        }
 
 
-# =====================================================
-# 5. REQUEST HISTORY FOR ADMIN DASHBOARD
-# =====================================================
-
-def get_request_history(limit: int = 100, offset: int = 0) -> list[dict]:
-    """
-    Return recent request records for an admin dashboard.
-    Does not include question text or generated answers.
-    """
-    safe_limit = max(1, min(int(limit), 1000))
-    safe_offset = max(0, int(offset))
-
-    with _connect() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, timestamp_utc, status, latency_seconds,
-                   error_category, endpoint, request_id
+def get_request_history(limit=100, offset=0):
+    with _connect() as conn:
+        rows = conn.execute("""
+            SELECT
+                timestamp_utc,
+                status,
+                latency_seconds,
+                error_category,
+                endpoint,
+                request_id,
+                predicted_intent,
+                feedback
             FROM request_metrics
             ORDER BY id DESC
             LIMIT ? OFFSET ?
-            """,
-            (safe_limit, safe_offset),
-        ).fetchall()
+        """, (limit, offset)).fetchall()
 
-    return [
-        {
-            "id": int(row["id"]),
-            "timestamp_utc": row["timestamp_utc"],
-            "status": row["status"],
-            "latency_seconds": round(float(row["latency_seconds"]), 3),
-            "error_category": row["error_category"],
-            "endpoint": row["endpoint"],
-            "request_id": row["request_id"],
-        }
-        for row in rows
-    ]
+        return [dict(row) for row in rows]
 
 
-# =====================================================
-# 6. LATENCY TREND FOR CHARTS
-# =====================================================
-
-def get_latency_trend(limit: int = 100) -> list[dict]:
-    """Return recent request latency points in chronological order."""
-    safe_limit = max(1, min(int(limit), 1000))
-
-    with _connect() as connection:
-        rows = connection.execute(
-            """
+def get_latency_trend(limit=100):
+    with _connect() as conn:
+        rows = conn.execute("""
             SELECT timestamp_utc, latency_seconds, status
             FROM (
-                SELECT id, timestamp_utc, latency_seconds, status
+                SELECT timestamp_utc, latency_seconds, status, id
                 FROM request_metrics
                 ORDER BY id DESC
                 LIMIT ?
             )
             ORDER BY id ASC
-            """,
-            (safe_limit,),
-        ).fetchall()
+        """, (limit,)).fetchall()
 
-    return [
-        {
-            "timestamp_utc": row["timestamp_utc"],
-            "latency_seconds": round(float(row["latency_seconds"]), 3),
-            "status": row["status"],
-        }
-        for row in rows
-    ]
+        return [dict(row) for row in rows]
 
 
-# =====================================================
-# 7. DAILY COUNTS
-# =====================================================
-
-def get_daily_metrics(days: int = 30) -> list[dict]:
-    """Return daily counts and average latency for the last N days."""
-    safe_days = max(1, min(int(days), 365))
-
-    with _connect() as connection:
-        rows = connection.execute(
-            """
+def get_daily_metrics(days=30):
+    with _connect() as conn:
+        rows = conn.execute("""
             SELECT
-                substr(timestamp_utc, 1, 10) AS date,
+                DATE(timestamp_utc) AS date,
                 COUNT(*) AS total_requests,
                 SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)
                     AS successful_requests,
@@ -309,25 +218,56 @@ def get_daily_metrics(days: int = 30) -> list[dict]:
                     AS failed_requests,
                 SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END)
                     AS blocked_requests,
-                AVG(latency_seconds) AS average_latency_seconds
+                AVG(latency_seconds) AS avg_latency_seconds
             FROM request_metrics
-            WHERE timestamp_utc >= date('now', ?)
-            GROUP BY substr(timestamp_utc, 1, 10)
+            WHERE timestamp_utc >= DATETIME('now', ?)
+            GROUP BY DATE(timestamp_utc)
             ORDER BY date ASC
-            """,
-            (f"-{safe_days - 1} days",),
-        ).fetchall()
+        """, (f"-{days} days",)).fetchall()
 
-    return [
-        {
-            "date": row["date"],
-            "total_requests": int(row["total_requests"] or 0),
-            "successful_requests": int(row["successful_requests"] or 0),
-            "failed_requests": int(row["failed_requests"] or 0),
-            "blocked_requests": int(row["blocked_requests"] or 0),
-            "average_latency_seconds": round(
-                float(row["average_latency_seconds"] or 0), 3
-            ),
+        return [dict(row) for row in rows]
+
+
+def get_intent_metrics():
+    with _connect() as conn:
+        rows = conn.execute("""
+            SELECT
+                predicted_intent AS intent,
+                COUNT(*) AS count
+            FROM request_metrics
+            WHERE predicted_intent IS NOT NULL
+            GROUP BY predicted_intent
+            ORDER BY count DESC
+        """).fetchall()
+
+        return [dict(row) for row in rows]
+
+
+def get_feedback_metrics():
+    with _connect() as conn:
+        row = conn.execute("""
+            SELECT
+                SUM(CASE WHEN feedback = 'helpful' THEN 1 ELSE 0 END)
+                    AS helpful,
+                SUM(CASE WHEN feedback = 'not_helpful' THEN 1 ELSE 0 END)
+                    AS not_helpful,
+                COUNT(feedback) AS total_feedback
+            FROM request_metrics
+        """).fetchone()
+
+        helpful = row["helpful"] or 0
+        not_helpful = row["not_helpful"] or 0
+        total = row["total_feedback"] or 0
+
+        return {
+            "helpful": helpful,
+            "not_helpful": not_helpful,
+            "total_feedback": total,
+            "positive_percentage": (
+                round((helpful / total) * 100, 2)
+                if total else 0
+            )
         }
-        for row in rows
-    ]
+
+
+init_db()

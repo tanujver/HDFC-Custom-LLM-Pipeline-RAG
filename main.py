@@ -2,6 +2,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import joblib
 from fastapi import FastAPI, HTTPException, Request
@@ -11,10 +12,13 @@ import rag
 from guardrails import validate_input, validate_output, mask_pii
 from monitoring import (
     record_request,
+    record_feedback,
     get_metrics,
     get_request_history,
     get_latency_trend,
     get_daily_metrics,
+    get_intent_metrics,
+    get_feedback_metrics,
 )
 
 
@@ -78,20 +82,25 @@ logger.info("Intent classifier loaded successfully.")
 
 app = FastAPI(
     title="HDFC Custom LLM Pipeline API",
-    version="1.1.0",
+    version="1.2.0",
     description=(
         "Employee-facing HDFC Bank AI Assistant API "
-        "with persistent monitoring."
+        "with persistent monitoring, intent analytics and feedback."
     ),
 )
 
 
 # =====================================================
-# 5. REQUEST SCHEMA
+# 5. REQUEST SCHEMAS
 # =====================================================
 
 class QuestionRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=8000)
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=100)
+    feedback: Literal["helpful", "not_helpful"]
 
 
 # =====================================================
@@ -100,7 +109,8 @@ class QuestionRequest(BaseModel):
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    """Attach a unique ID to each HTTP request and log its latency."""
+    """Attach a unique ID to each HTTP request and log latency."""
+
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
 
@@ -160,11 +170,6 @@ def home(request: Request):
 def health(request: Request):
     request_id = request.state.request_id
 
-    logger.info(
-        "Health endpoint accessed | Request ID: %s",
-        request_id,
-    )
-
     return {
         "status": "healthy",
         "faq_records": len(rag.faq_df),
@@ -175,21 +180,15 @@ def health(request: Request):
 
 
 # =====================================================
-# 9. METRICS ENDPOINTS
+# 9. EXISTING METRICS ENDPOINTS
 # =====================================================
 
 @app.get("/metrics")
 def metrics(request: Request):
-    """Return persistent, all-time request metrics."""
-    request_id = request.state.request_id
-
-    logger.info(
-        "Metrics endpoint accessed | Request ID: %s",
-        request_id,
-    )
+    """Return all-time request metrics."""
 
     result = get_metrics()
-    result["request_id"] = request_id
+    result["request_id"] = request.state.request_id
 
     return result
 
@@ -200,11 +199,10 @@ def metrics_history(
     limit: int = 100,
     offset: int = 0,
 ):
-    """Return recent request metadata without question or answer text."""
-    request_id = request.state.request_id
+    """Return recent request metadata."""
 
     return {
-        "request_id": request_id,
+        "request_id": request.state.request_id,
         "items": get_request_history(
             limit=limit,
             offset=offset,
@@ -217,11 +215,10 @@ def metrics_latency_trend(
     request: Request,
     limit: int = 100,
 ):
-    """Return recent latency observations for charts."""
-    request_id = request.state.request_id
+    """Return recent latency observations."""
 
     return {
-        "request_id": request_id,
+        "request_id": request.state.request_id,
         "items": get_latency_trend(limit=limit),
     }
 
@@ -231,29 +228,114 @@ def metrics_daily(
     request: Request,
     days: int = 30,
 ):
-    """Return daily request counts and average latency."""
-    request_id = request.state.request_id
+    """Return daily request metrics."""
 
     return {
-        "request_id": request_id,
+        "request_id": request.state.request_id,
         "items": get_daily_metrics(days=days),
     }
 
 
 # =====================================================
-# 10. ASK ENDPOINT
+# 10. NEW INTENT ANALYTICS ENDPOINT
+# =====================================================
+
+@app.get("/metrics/intents")
+def metrics_intents(request: Request):
+    """Return request counts grouped by predicted intent."""
+
+    return {
+        "request_id": request.state.request_id,
+        "items": get_intent_metrics(),
+    }
+
+
+# =====================================================
+# 11. NEW FEEDBACK ANALYTICS ENDPOINT
+# =====================================================
+
+@app.get("/metrics/feedback")
+def metrics_feedback(request: Request):
+    """Return helpful and not-helpful feedback statistics."""
+
+    return {
+        "request_id": request.state.request_id,
+        "data": get_feedback_metrics(),
+    }
+
+
+# =====================================================
+# 12. NEW FEEDBACK SUBMISSION ENDPOINT
+# =====================================================
+
+@app.post("/feedback")
+def submit_feedback(
+    payload: FeedbackRequest,
+    request: Request,
+):
+    """Store employee feedback against an existing ask request."""
+
+    request_id = request.state.request_id
+
+    try:
+        updated = record_feedback(
+            request_id=payload.request_id,
+            feedback=payload.feedback,
+        )
+
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail="Request ID not found. Feedback was not saved.",
+            )
+
+        logger.info(
+            "Feedback saved | Original Request ID: %s | "
+            "Feedback: %s | Feedback API Request ID: %s",
+            payload.request_id,
+            payload.feedback,
+            request_id,
+        )
+
+        return {
+            "status": "success",
+            "message": "Feedback saved successfully.",
+            "feedback": payload.feedback,
+            "request_id": payload.request_id,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        logger.exception(
+            "Feedback could not be saved | Request ID: %s",
+            request_id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to save feedback.",
+        )
+
+
+# =====================================================
+# 13. ASK ENDPOINT
 # =====================================================
 
 @app.post("/ask")
 def ask(payload: QuestionRequest, request: Request):
     """
-    Validate the question, retrieve FAQs, generate an answer,
-    and persist request metrics.
+    Validate question, predict intent, retrieve FAQs,
+    generate an answer and persist monitoring metrics.
     """
 
     start_time = time.perf_counter()
+
     status = "failure"
     error_category = None
+    intent = None
+
     request_id = request.state.request_id
 
     logger.info(
@@ -262,6 +344,7 @@ def ask(payload: QuestionRequest, request: Request):
     )
 
     try:
+
         # -------------------------------------------------
         # STEP 1: Validate question
         # -------------------------------------------------
@@ -343,6 +426,7 @@ def ask(payload: QuestionRequest, request: Request):
 
         # -------------------------------------------------
         # STEP 4: FAQ retrieval
+        # Intent is NOT used for retrieval.
         # -------------------------------------------------
 
         try:
@@ -477,7 +561,7 @@ def ask(payload: QuestionRequest, request: Request):
         ]
 
         # -------------------------------------------------
-        # STEP 9: Return successful response
+        # STEP 9: Successful response
         # -------------------------------------------------
 
         status = "success"
@@ -492,12 +576,14 @@ def ask(payload: QuestionRequest, request: Request):
         }
 
     except HTTPException as exc:
+
         if error_category is None:
             error_category = f"http_{exc.status_code}"
 
         raise
 
     except Exception:
+
         error_category = error_category or "unexpected_error"
 
         logger.exception(
@@ -512,8 +598,9 @@ def ask(payload: QuestionRequest, request: Request):
         )
 
     finally:
+
         # -------------------------------------------------
-        # STEP 10: Persist monitoring metrics
+        # STEP 10: Persist request metrics and predicted intent
         # -------------------------------------------------
 
         elapsed_seconds = time.perf_counter() - start_time
@@ -525,10 +612,11 @@ def ask(payload: QuestionRequest, request: Request):
                 error_category=error_category,
                 endpoint="/ask",
                 request_id=request_id,
+                predicted_intent=intent,
             )
 
         except Exception:
-            # Monitoring failure must not replace the actual API response.
+
             logger.exception(
                 "Could not persist monitoring record | Request ID: %s",
                 request_id,
@@ -536,9 +624,10 @@ def ask(payload: QuestionRequest, request: Request):
 
         logger.info(
             "Ask request finished | Request ID: %s | Status: %s | "
-            "Error category: %s | Latency: %.3f seconds",
+            "Intent: %s | Error category: %s | Latency: %.3f seconds",
             request_id,
             status,
+            intent or "none",
             error_category or "none",
             elapsed_seconds,
         )
