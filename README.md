@@ -2,11 +2,11 @@
 
 
 
-**Live Application:** https://hdfc-custom-llm-pipeline-rag-ui.onrender.com
+**Live Application:** https://hdfc-custom-llm-pipeline-rag-2.onrender.com/
 
-**Backend API:** https://hdfc-custom-llm-pipeline-rag.onrender.com/
+**Backend API:** https://hdfc-custom-llm-pipeline-rag-new.onrender.com/
 
-**API Documentation:** https://hdfc-custom-llm-pipeline-rag.onrender.com/docs
+**API Documentation:** https://hdfc-custom-llm-pipeline-rag-new.onrender.com/docs
 
 **Relevant Screenshots:** https://drive.google.com/drive/folders/1Qvn9Pc9wTtaPJXMUmnsZhlmM95J6th0V?usp=sharing
 
